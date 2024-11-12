@@ -1,0 +1,4 @@
+"0","knitr::opts_chunk$set(echo = TRUE)"
+"0","rm(list =ls())"
+"0","options(scipen = 999)"
+"0","options(digits = 8)"

@@ -1,0 +1,545 @@
+---
+title: "Análisis de Riesgo de Enfermamdes Cardiovasculares utilizando Árboles de Decisión"
+author: "Marcello Eduardo Anchante Fernandez"
+date: "`r Sys.Date()`"
+output:
+  rmdformats::downcute:
+    lightbox: true
+    gallery: false
+    code_download: yes
+    code_folding: show
+    cards: false
+  editor_options: 
+    markdown: 
+      wrap: 72
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+rm(list =ls())
+options(scipen = 999)
+options(digits = 8)
+```
+
+```{css, echo=FALSE}
+.Wrap {
+  width: 100%;
+  max-width: 2000px;
+  
+h1 {
+  font-weight: bold; /* Hace el texto en negrita */
+}
+
+p {
+    font-size: 20
+}
+
+background-color: #EBEBEB;
+
+
+}
+.Sidebar {
+  width: 240px;
+  padding: 30px 0 40px;
+  background: #a53269;
+}
+.Content {
+  padding: 0 20px 0 50px;
+}
+.Main {
+  padding-left: 500 px;
+}
+#toc > ul li a {
+  font-size: 0.9rem;
+  color: white;
+}
+```
+
+# Descripción del caso
+
+Las enfermedades cardiovasculares, como los ataques al corazón y los accidentes cerebrovasculares, son una de las principales causas de mortalidad a nivel mundial. Según la Organización Mundial de la Salud (OMS), estas enfermedades son responsables de millones de muertes cada año, lo que subraya la importancia de la prevención y el diagnóstico temprano. En este contexto, el uso de modelos predictivos basados en datos se ha convertido en una herramienta valiosa para identificar a personas con alto riesgo de sufrir eventos cardíacos.
+
+Este estudio se centra en la predicción del riesgo de enfermedades cardíacas utilizando un conjunto de datos que agrupa información de cinco fuentes públicas. El dataset contiene un total de 1,888 registros y 14 características que abarcan tanto factores médicos como demográficos, proporcionando una base sólida para evaluar la probabilidad de un ataque cardíaco. Entre las características analizadas se incluyen la edad, el género, los niveles de colesterol, la presión arterial, el tipo de dolor en el pecho, y otros indicadores relevantes que pueden influir en la salud cardiovascular.
+
+El objetivo principal es desarrollar un modelo basado en los **árboles de decisión** que permita predecir con precisión si un paciente sufre un ataque al corazón, basándonos en estos factores de riesgo. Esto no solo ayudaría a los profesionales de la salud a tomar decisiones informadas sobre intervenciones preventivas, sino que también podría mejorar los resultados clínicos mediante un tratamiento más temprano y personalizado.
+
+```{r echo=FALSE, out.width="30%"}
+knitr::include_graphics("foto.png")
+```
+
+# Descripción de las variables
+
+- **age**: Edad del paciente (Numérica).
+
+- **sex**: Género del paciente. Valores: 1 = hombre, 0 = mujer.
+
+- **cp**: Tipo de dolor en el pecho. 
+
+    Valores:
+    
+    0 = Angina típica
+    
+    1 = Angina atípica
+    
+    2 = Dolor no anginoso
+    
+    3 = Asintomático
+    
+- **trestbps**: Presión arterial en reposo (en mm Hg) (Numérica).
+
+- **chol**: Nivel de colesterol en suero (en mg/dl) (Numérica).
+
+- **fbs**: Glucemia en ayunas > 120 mg/dl. Valores: 1 = verdadero, 0 = falso.
+
+- **restecg**: Resultados del electrocardiograma en reposo. 
+    
+    Valores:
+    
+    0 = Normal
+    
+    1 = Anomalía en la onda ST-T
+    
+    2 = Hipertrofia ventricular izquierda
+
+- **thalach**: Frecuencia cardíaca máxima alcanzada (Numérica).
+
+- **exang**: Angina inducida por ejercicio. Valores: 1 = sí, 0 = no.
+
+- **oldpeak**: Depresión del ST inducida por el ejercicio en relación con el reposo (Numérica).
+
+- **slope**: Pendiente del segmento ST en el pico del ejercicio. 
+
+    Valores:
+
+    0 = Ascendente
+    
+    1 = Plano
+    
+    2 = Descendente
+    
+- **ca**: Número de vasos principales (0-3) coloreados por fluoroscopia. 
+
+    Valores: 0, 1, 2, 3.
+
+- **thal**: Tipos de talasemia. 
+    
+    Valores:
+
+    1 = Normal
+    
+    2 = Defecto fijo
+    
+    3 = Defecto reversible
+
+- **target**: Variable de resultado (riesgo de ataque cardíaco). 
+
+    Valores:
+
+    1 = Mayor probabilidad de ataque cardíaco
+    
+    0 = Menor probabilidad de ataque cardíaco
+
+# Librerías
+
+```{r warning=FALSE, message=F}
+library(tidymodels)
+library(doParallel)
+library(parallel)
+```
+
+
+# Lectura de datos
+
+
+```{r}
+datos = readr::read_csv('cleaned_merged_heart_dataset.csv',show_col_types = FALSE)
+
+head(datos)
+```
+
+# Pre-procesamiento de datos
+
+## Conversión a factor
+
+```{r}
+datos$sex = factor(datos$sex, levels = c(0,1), labels = c('female','male'))
+datos$cp = factor(datos$cp, levels = c(0,1,2,3))
+datos$fbs = as.factor(datos$fbs)
+datos$restecg = as.factor(datos$restecg)
+datos$exang = as.factor(datos$exang)
+datos$slope = as.factor(datos$slope)
+datos$ca = as.factor(datos$ca)
+datos$thal = as.factor(datos$thal)
+datos$target = factor(datos$target, levels = c(0,1), labels = c('no','yes'))
+
+head(datos)
+```
+## Partición de datos
+
+### Generación de la partición
+
+```{r}
+set.seed(2024)
+datos_split = initial_split(datos, prop = .7, strata = target)
+datos_split
+```
+
+### Separación de datos
+
+```{r}
+datos_train = training(datos_split)
+datos_test = testing(datos_split)
+```
+
+### Imputación de datos perdidos por k-nn
+
+```{r}
+set.seed(2024)
+datos_train = recipe(target~.,data = datos_train) %>% 
+  step_impute_knn(all_predictors()) %>% 
+  prep() %>% 
+  bake(new_data = NULL)
+
+set.seed(2024)
+datos_test = recipe(target~.,data = datos_train) %>% 
+  step_impute_knn(all_predictors()) %>% 
+  prep() %>% 
+  bake(new_data = datos_test)
+```
+
+# Modelamiento de datos inicial
+
+## Validación cruzada
+
+```{r}
+datos_fold <- vfold_cv(datos_train, v = 20, strata = target)
+```
+
+## Recipe
+
+```{r}
+set.seed(2024)
+datos_recipe_dt = 
+  recipe(target~., datos_train) %>%
+  step_impute_knn(all_predictors())
+```
+
+## Creación del modelo
+
+```{r}
+des_tree = decision_tree() %>% 
+  set_engine('rpart') %>% 
+  set_mode('classification')
+```
+
+## Flujo de trabajo
+
+```{r}
+work_flow_dt = 
+  workflow() %>% 
+  add_model(des_tree) %>%
+  add_recipe(datos_recipe_dt)
+```
+
+## El mejor modelo
+
+```{r}
+modelo_final_dt=
+  work_flow_dt %>% 
+  fit_resamples(resamples = datos_fold) %>% 
+  show_best(metric='accuracy')
+modelo_final_dt
+```
+
+## Ajuste del modelo
+
+```{r}
+modelo_final_dt_fit=
+  work_flow_dt %>% 
+  finalize_workflow(modelo_final_dt) %>% 
+  fit(data = datos_train)
+rpart.plot::rpart.plot(extract_fit_engine(modelo_final_dt_fit),roundint = F)
+```
+
+## Predicción
+
+```{r}
+class_pred=
+  modelo_final_dt_fit %>% 
+  predict(new_data = datos_test)
+
+resultados_dt = 
+  datos_test %>% 
+  select(target) %>% 
+  bind_cols(class_pred)
+
+head(resultados_dt,10)
+```
+
+## Métricas
+
+```{r}
+
+resultados_dt %>%  
+  conf_mat(truth = target,
+           estimate = .pred_class)
+
+metricas <- metric_set( accuracy, kap, precision, recall, f_meas, sens, spec)
+
+resultados_dt %>% 
+  metricas(truth = target, estimate = .pred_class)
+
+```
+
+# Modelamiento de datos con hiperparámetros
+
+## Creación del modelo con tuneo
+
+```{r}
+des_tree = decision_tree(tree_depth = tune(),
+                         min_n = tune(),
+                         cost_complexity = tune()) %>% 
+  set_engine('rpart') %>% 
+  set_mode('classification')
+```
+
+## Flujo de trabajo
+
+```{r}
+work_flow_dt = 
+  workflow() %>% 
+  add_model(des_tree) %>%
+  add_recipe(datos_recipe_dt)
+```
+
+## Hiperparámetros
+
+```{r}
+grid = grid_random(extract_parameter_set_dials(des_tree), size = 500)
+```
+
+
+```{r}
+modelos_elegidos = tibble(cost_complexity = 
+                        c(0.0000000001,6.70e-10,0.000000232,0.00000000309,0.000000998,0.00000978),
+                          tree_depth = 
+                            c(10,13,14,10,12,15),
+                          min_n = c(2,2,3,2,3,4)
+                          )
+```
+
+## Modelos aleatorios
+
+```{r }
+library(doParallel)
+library(parallel)
+registerDoParallel(cores = parallel::detectCores())
+tictoc::tic()
+set.seed(2024)
+resultados_tune_aleat = 
+  work_flow_dt %>% 
+  tune_grid(resamples = datos_fold, grid = grid, metrics = metric_set(roc_auc,sens,spec,accuracy))
+stopImplicitCluster()
+tictoc::toc()
+```
+```{r}
+best_model_aleat = 
+  resultados_tune_aleat %>% 
+  select_best(metric = 'accuracy')
+
+best_model_aleat
+
+best_model_fit_aleat = 
+  work_flow_dt %>% 
+  finalize_workflow(best_model_aleat) %>% 
+  fit(data = datos_train)
+
+set.seed(2024)
+work_flow_dt %>%
+  finalize_workflow(best_model_aleat) %>%
+  last_fit(split = datos_split, metrics = metric_set(roc_auc,sens,spec,accuracy)) %>% 
+  collect_metrics(summarize=T)
+
+```
+
+### Gráfico
+
+```{r warning=FALSE}
+rpart.plot::rpart.plot(extract_fit_engine(best_model_fit_aleat),cex = 0.4,roundint = F)
+```
+
+
+
+### Predicción
+```{r}
+class_pred_tune_aleat = 
+  best_model_fit_aleat %>% 
+  predict(new_data = datos_test)
+
+resultados_dt_tune_aleat = 
+  datos_test %>% 
+  select(target) %>% 
+  bind_cols(class_pred_tune_aleat)
+
+```
+
+### Métricas
+
+```{r}
+resultados_dt_tune_aleat %>%  
+  conf_mat(truth = target,
+           estimate = .pred_class)
+
+resultados_dt_tune_aleat %>%  
+  metricas(truth = target,
+           estimate = .pred_class)
+
+```
+
+## Modelos previamente renderizados
+
+```{r}
+registerDoParallel(cores = parallel::detectCores())
+tictoc::tic()
+resultados_tune_elegidos = 
+  work_flow_dt %>% 
+  tune_grid(resamples = datos_fold, grid = modelos_elegidos, metrics = metric_set(roc_auc,sens,spec,accuracy))
+stopImplicitCluster()
+tictoc::toc()
+```
+```{r}
+best_model_elegido = 
+  resultados_tune_elegidos %>% 
+  select_best(metric = 'accuracy')
+
+best_model_elegido
+
+best_model_fit_elegido = 
+  work_flow_dt %>% 
+  finalize_workflow(best_model_elegido) %>% 
+  last_fit(split = datos_split, metrics = metricas)
+
+set.seed(2024)
+work_flow_dt %>%
+  finalize_workflow(best_model_elegido) %>%
+  last_fit(split = datos_split, metrics = metric_set(roc_auc,sens,spec,accuracy)) %>% 
+  collect_metrics(summarize=T)
+
+```
+
+### Gráfico
+
+```{r warning=F}
+rpart.plot::rpart.plot(extract_fit_engine(best_model_fit_elegido),cex = 0.3,roundint = F)
+```
+
+
+### Predicción
+```{r}
+class_pred_tune_elegido = 
+  extract_workflow(best_model_fit_elegido) %>% 
+  predict(new_data = datos_test)
+
+resultados_dt_tune_elegido = 
+  datos_test %>% 
+  select(target) %>% 
+  bind_cols(class_pred_tune_elegido)
+
+```
+
+### Métricas
+
+```{r}
+resultados_dt_tune_aleat %>%  
+  conf_mat(truth = target,
+           estimate = .pred_class)
+
+resultados_dt_tune_aleat %>%  
+  metricas(truth = target,
+           estimate = .pred_class)
+
+```
+
+# Resultados
+
+Como se observa en los modelos obtenidos, se tienen las mismas métricas de Accuracy, Sensibilidad, Especificidad y valor ROC mostradas a continuación.
+
+```{r echo=F, include=T}
+set.seed(2024)
+work_flow_dt %>%
+  finalize_workflow(best_model_elegido) %>%
+  last_fit(split = datos_split, metrics = metric_set(roc_auc,sens,spec,accuracy)) %>% 
+  collect_metrics(summarize=T) %>% 
+  select(-.config,-.estimator) %>% 
+  rename(Metrica=.metric, Valor = .estimate) %>% 
+  replace('Metrica',c('Sensibilidad','Especificidad',
+                                                  'Accuracy','Valor ROC')) %>% 
+  knitr::kable()
+
+```
+
+Debido a que las métricas son exactamente las mismas en ambos modelos elegidos, los factores para elegir el modelo ideal no se basará en las métricas utilizadas, sino se basarán en los hiperparámetros utilizados.
+
+- *Modelo 1: Aleatorizado*
+
+```{r echo=F, include=T}
+best_model_aleat %>% knitr::kable(digits = 14)
+```
+
+- *Modelo 2: Pre-renderizado*
+
+```{r echo=F, include=T}
+best_model_elegido %>% knitr::kable(digits = 14)
+```
+
+Para explicar los criterios que se utilizarán, es necesario entender el significado de cada hiperparámetro.
+
+- *Costo de complejidad* (`cost_complexity`)
+
+  Este costo indica la penalización de poda de un árbo. Una menor penalización de poda conduce a una mayor complejidad del árbol, lo cual reduce el overfitting. 
+  
+```{r echo=F, include=T, message=F}
+r1 = bind_cols(best_model_aleat[,'cost_complexity'],best_model_elegido[,'cost_complexity'])
+colnames(r1) = c('Modelo 1','Modelo 2')
+r1 %>% knitr::kable(digits = 14)
+```
+  
+  
+  En este caso, el *modelo 2: pre-renderizado* cuenta con un costo de complejidad menor respecto al *modelo 1: aleatorio*¨, lo cual indica que el modelo 2 tiene una mayor complejidad a la hora de predecir y hallar patrones de datos.
+  
+- *Profundidad del árbol* (`tree_depth`)
+  
+  Este hiperparámetro indica la profundidad de niveles en el árbol de decisiones. Una mayor profundidad puede generar problemas de overfitting y de simplicidad del árbol.
+  
+```{r echo=F, include=T, message=F}
+r2 = bind_cols(best_model_aleat[,'tree_depth'],best_model_elegido[,'tree_depth'])
+colnames(r2) = c('Modelo 1','Modelo 2')
+r2 %>% knitr::kable(digits = 14)
+```
+
+  En este caso, el *modelo 2: Pre-renderizado* tiene una menor profundidad respecto al *modelo 1: Aleatorio*; por lo tanto, nos conviene utilizar este segundo modelo ya que reduce el overfitting, es menos complejo y más robusto que el otro modelo.
+  
+  
+- *Número mínimo de observaciones por nodo* (`min_n`)
+
+  Este hiperparámetro indica el mínimo número de observaciones que debe haber para abrir un nodo. Un menor valor conduce a un árbol más detallado y complejo pero con mayor riesgo de caer en overfitting.
+
+```{r echo=F, include=T, message=F}
+r3 = bind_cols(best_model_aleat[,'min_n'],best_model_elegido[,'min_n'])
+colnames(r3) = c('Modelo 1','Modelo 2')
+r3 %>% knitr::kable(digits = 14)
+```
+  
+  En este caso, ambos modelos tienen como valor mínimo por nodo a 2. No hay diferencia en este caso. Una desventaja podría ser que el árbol podría sobreajustarse y volverse muy complejo ya que el valor 2 es muy pequeño.
+  
+
+# Conclusión
+
+Como se ha observado en el documento, se ha aplicado etapas de pre-procesamiento como la imputación de datos mediante K-nn y se ha modelado en base a un árbol de decisión con distintos hiperparámetros para hallar un modelo con altos valores de precisión, reduciendo el error en lo mejor posible. 
+
+En el primer caso, se optó por realizar un árbol de decisión con hiperparámetros por defecto y se observó que el ajuste del modelo es regularmente alto(aproximadamente el 82%); sin embargo, aún había posibilidades de aumentar los indicadores.
+
+Tanto en el segundo y tercer caso, se optó por modificar los hiperparámetros y se obtuvieron las mismas métricas en ambos casos; por lo cual, se decidió comparar los hiperparámetros para establecer el modelo ideal.
+
+Tras lo mostrado en el capítulo de Resultados, el modelo escogido en este documento es el segundo, el cual ha demostrado caer en menos overfitting debido a que no tiene mucha profundidad y tampoco tiene un alto costo de complejidad.
+
